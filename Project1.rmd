@@ -1,0 +1,153 @@
+---
+title: "Prediction of Exercise Accuracy"
+author: "Ram Ravichandran"
+date: "May 27, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Executive Summary
+This project studies how well an exercise activity is done.  Data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants is used from the 2012 study conducted by Ugulino and associates.  Participants performed barbell lifts correctly and incorrectly in 5 different ways. 
+
+Two models are used to classify the outcomes: Linear Discriminant Analysis (LDA) and Ranger (random forest). Using a cross-validation design approach, the main dataset was divided equally, one for training and one for testing. The training data was used to build the models. Prediction accuracies I using the testing data were found to be  0.714882 for LDA and 0.9962283 for Ranger. Finally, prediction were generated for the final out-of-sample validation set with 20 observations. While the accuracy is pretty high at 0.9962283 for the LDA model,  we conservatively estimate the out-of-sample error to be around 0.01 rather than the 0.004 found in the testing sample.
+
+## Data Source
+
+###Original Study Report:
+
+Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements. Proceedings of 21st Brazilian Symposium on Artificial Intelligence. Advances in Artificial Intelligence - SBIA 2012. In: Lecture Notes in Computer Science. , pp. 52-61. Curitiba, PR: Springer Berlin / Heidelberg, 2012. ISBN 978-3-642-34458-9. DOI: 10.1007/978-3-642-34459-6_6.
+
+
+###Study Details
+
+The details of the original study is available at http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har
+
+### Training Data
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+### Test Data
+
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+
+## Exploratory Data Analysis
+
+The goal of the study is to predict six different ways of performing exercise. One correct way coded as A and 5 incorrect ways coded as B, C, D, E, and F.  
+There were 19622 observations in the training data set with 160 variables. As a first step, three variables were identified for removal since they were not of direct relevance for prediction: user name, trial, and date timestamp. 
+
+Then variables with more than 60% missing values were removed, resulting in 60 variables. Next by scanning the data, two factor variables were identified: classe (outcome variable with A, B, C, D, E, and F values) and new_window with "yes" and "no" variables. Finally the data set had 57 variables.
+
+## Model Building
+
+Given that this is a non-binomial classification/prediction problem, there are several models available to perform predictions. Models were selected based on the "An Introduction to Statistical Learning" textbook by James et al. (Chapters 4 and 8) and online help documentation for caret  (available at https://topepo.github.io/caret/).
+
+
+There were 19622 observations in the training data set with 57 variables. A cross validation was approach was taken and the data was split into a training set with 9812 observations and a testing set with 9812 observations. 
+Two models were used to classify the outcomes: Linear Discriminant Analysis (LDA) and Ranger (random forest). Using a cross-validation design approach, the main dataset was divided equally, one for training and one for testing. The training data was used to build the models. Prediction accuracies using the testing data were found to be  0.714882 for LDA and 0.9962283 for Ranger.  Given the high accuracy rate of ranger model, it was selected for final validation. While the accuracy is pretty high at 0.9962283 for the LDA model, the out-of-sample error is calculated as 1 - Accuracy or 1 - 0.9962283 or 0.04 for the Ranger model. We conservatively estimate the out-of-sample error to be 0.01.
+
+##Validation/Prediction
+
+
+Finally, predictions were generated for the final out-of-sample validation set with 20 observations. Since, the actual outcome values are  not available for these 20 observations, no accuracy or out-of-sample error calculations can be made.  
+
+# R Code and Output
+
+# Load Libraries and  Data
+
+```{r loaddata, results = 'hide', message = FALSE, warning = FALSE}
+# Load libraries
+library(data.table)
+library(caret)
+library(ranger)
+library(dplyr)
+
+# read in the original datasets
+validation_original  <- fread("./pml-testing.csv",na.strings=c("NA","#DIV/0!", ""))
+training_original <- fread("./pml-training.csv", na.strings=c("NA","#DIV/0!", ""))
+```
+
+#Exploratory Data Analysis
+```{r eda}
+
+df <- data.frame(training_original)
+# set up a vector for removing unneeded variables  
+remove_cols <- colnames(df) %in% c("user_name", "V1", "cvtd_timestamp")
+# remove variables with 60% or more percent of nulls 
+df1 <- df[, -which(colMeans(is.na(df)) > 0.6)]
+# remove variables
+df2 <-  df1[, -which(remove_cols)] 
+## convvert from character to factor
+df2$new_window <- factor(df2$new_window)
+df2$classe <- factor(df2$classe)
+```
+
+## Cross validation -- set up training and testing samples
+```{r cv}
+set.seed(111)
+inTrain = createDataPartition(df1$classe, p = 0.50)[[1]]
+training = df2[ inTrain,]
+testing = df2[-inTrain ,]
+dim(training)
+dim(testing)
+
+# apply the training set transformations to the data set for final validation
+valid_df  <- data.frame(validation_original)
+valid_df1 <- valid_df[, -which(colMeans(is.na(df)) > 0.6)]
+validation <- valid_df1[, -which(remove_cols)]
+validation$new_window <- factor(validation$new_window)
+# no classe variable in validation
+dim(validation)
+```
+
+## Model LDA: fittng and testing  
+```{r lda}
+
+m_lda<- train(classe ~ ., data=training, method="lda")
+
+
+p_lda_train <- predict(m_lda, training)
+cm_lda_train <- confusionMatrix(p_lda_train, training$classe)
+cm_lda_train
+cm_lda_train$overall[1]
+
+
+p_lda_test <- predict(m_lda, testing)
+cm_lda_test <- confusionMatrix(p_lda_test, testing$classe)
+cm_lda_test
+cm_lda_test$overall[1]
+```
+
+## Model Ranger: fitting and testing
+```{r ranger}
+# restrict resampling to 4 
+rf_control <- trainControl(method = "oob", number = 4) 
+rf_grid <- expand.grid(mtry = c(1:4), splitrule = "gini", min.node.size = 1) 
+
+set.seed(111)
+m_rf <- train(classe ~ ., data = training, method = "ranger", trControl = rf_control, tuneGrid = rf_grid)
+summary(m_rf)
+
+p_rf_train <- predict(m_rf, training)
+cm_rf_train <- confusionMatrix(p_rf_train, training$classe) 
+cm_rf_train
+cm_rf_train$overall[1] 
+
+p_rf_test <- predict(m_rf, testing)
+cm_rf_test <- confusionMatrix(p_rf_test, testing$classe) 
+cm_rf_test
+cm_rf_test$overall[1] 
+```
+
+## Predictions for Validation Set
+```{r valid}
+# Make predictions using the Ranger model for the validation
+# 20 observations in the validation set
+p_rf_valid <- predict(m_rf, validation)
+p_rf_valid
+```
